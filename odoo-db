@@ -1,0 +1,246 @@
+#!/usr/bin/env bash
+
+ProgramName=$(basename $0)
+
+# START: Functions
+Help () {
+  case $1 in
+    list|ls)
+      printf "Usage: $ProgramName (list|ls) -s hostname\n"
+      printf "List all available database on a server.\n"
+      printf "\nOptions:\n"
+      printf "   --source, -s \n\tServer's Hostname\n";;
+    backup)
+      printf "Usage: $ProgramName backup -s hostname [Options]\n"
+      printf "Download a database from server.\n"
+      printf "\nOptions:\n"
+      printf "   --source, -s \n\tServer's Hostname\n"
+      printf "   --source-name, -sn \n\tServer's Database Name\n"
+      printf "   --local-directory, -ld \n\tDirectory Where Downloaded Database Stored\n";;
+    restore)
+      printf "Usage: $ProgramName restore -s hostname -d destination_host -dn database_name [Options]\n"
+      printf "Download a database from server then restore it into destination server.\n"
+      printf "\nOptions:\n"
+      printf "   --source, -s \n\tServer's Hostname (or a file)\n"
+      printf "   --source-name, -sn \n\tServer's Database Name (unused when -s is a file)\n"
+      printf "   --destination, -d \n\tDestination Server's Hostname\n"
+      printf "   --destination-name, -dn \n\tDestination Server's Database Name\n"
+      printf "   --local-directory, -ld \n\tDirectory Where Downloaded Database Stored (unused when -s is a file)\n";;
+    delete)
+      printf "Usage: $ProgramName delete -s hostname -sn db_name [Options]\n"
+      printf "Delete a database from server.\n"
+      printf "\nOptions:\n"
+      printf "   --source, -s \n\tServer's Hostname\n"
+      printf "   --source-name, -sn \n\tServer's Database Name\n";;
+    *)
+      printf "Usage:\n"
+      printf "\t$ProgramName (list|ls|backup|restore|delete) [Options]\n\n"
+      printf 'Use "-h" on list, backup, restore, or delete command to getting spesific help.\n';;
+  esac
+  printf '\n'
+}
+
+Log () {
+  printf "\033[1m$ProgramName: $1\033[0m\n" 1>&2
+}
+
+Err () {
+  printf "\033[4;31m$ProgramName: ($1) $2\033[0m\n"
+  exit 1
+}
+
+ListDB () {
+  Hostname=$1
+
+  Log "List of databases from '$Hostname'."
+
+  DBList=$(curl -s -X POST \
+     -H "Content-type: application/json" \
+     -d '{}' \
+     $Hostname/web/database/list | \
+     sed 's/.*\[\(.*\)\].*/\1/' | sed 's/,\s/\n/g' | tr -d \")
+
+  if [[ $DBList ]]; then
+    printf "$DBList\n"
+  else
+    Err 1 "Failed to list database, please check your servers and parameters!"
+  fi
+
+}
+
+DownloadDB () {
+  Hostname=$1
+  Filename=$2
+  Filepath=$3
+
+  stty -echo
+  read -p "$Hostname's DB Password: " Password
+  printf "\n"
+  stty echo
+
+  Log "Downloading '$Filename' database from '$Hostname'."
+
+  curl -s -X POST \
+      -F "master_pwd=$Password" \
+      -F "name=$Filename" \
+      -F "backup_format=zip" \
+      -o  $Filepath\
+      $Hostname/web/database/backup
+
+  if [[ $(file --mime-type -b $Filepath) == 'application/zip' ]]; then
+    Log "Database stored at '$Filepath'."
+  else
+    Err 1 "Failed to backup database, please check your servers and parameters!"
+  fi
+}
+
+RestoreDB () {
+  Hostname=$1
+  Filename=$2
+  Filepath=$3
+
+  stty -echo
+  read -p "$Hostname's DB Password: " Password
+  printf "\n"
+  stty echo
+
+  Log "Restoring '$Filepath' into '$Hostname'."
+
+  curl -s -F "master_pwd=$Password" \
+      -F "backup_file=@$Filepath" \
+      -F "copy=true" \
+      -F "name=$Filename" \
+      -o /dev/null \
+      $Hostname/web/database/restore
+
+  if [[ $(ListDB $Hostname 2>/dev/null | grep -w $Filename) ]]; then
+    Log "Database restored on '$Hostname' with name '$Filename'."
+  else
+    Err 1 "Failed to restore database, please check your servers and parameters!"
+  fi
+}
+
+DeleteDB () {
+  Hostname=$1
+  Filename=$2
+
+  stty -echo
+  read -p "$Hostname's DB Password: " Password
+  printf "\n"
+  stty echo
+
+  read -p "Are you sure to delete '$Filename' database at '$Hostname' (y/N)? " confirm
+
+  if [[ $confirm != [Yy] ]]; then
+    Log "Aborted!"
+    return 1
+  fi
+
+  Log "Deleting '$Filename' database at '$Hostname'."
+
+  curl -s -X POST \
+        -F "master_pwd=$Password" \
+        -F "name=$Filename" \
+        $Hostname/web/database/drop 1>/dev/null
+
+  if ! [[ $(ListDB $Hostname 2>/dev/null | grep -w $Filename) ]]; then
+      Log "Database '$Filename' on '$Hostname' is deleted."
+  else
+      Err 1 "Failed to delete database, please check your servers and parameters!"
+  fi
+}
+# END: Functions
+
+
+
+# START: Parsing arguments
+case $1 in
+  list|ls)
+    Mode='list';;
+  backup)
+    Mode='backup';;
+  restore)
+    Mode='restore';;
+  delete)
+    Mode='delete';;
+  --help|-h)
+    Help && exit 0;;
+  *)
+    printf 'Type "-h" for help!\n'
+esac
+shift
+
+while [ "$1" ]; do
+  case $1 in
+    --help|-h)
+      Help $Mode && exit 0;;
+    --source|-s)
+      shift
+      Source=$1;;
+    --source-name|-sn)
+      shift
+      SourceName=$1;;
+    --destination|-d)
+      shift
+      Destination=$1;;
+    --destination-name|-dn)
+      shift
+      DestinationName=$1;;
+    --local-directory|-ld)
+      shift
+      LocalDirectory=$1;;
+    *)
+      Err 1 'Unrecognised option(s) detected.';;
+  esac
+  shift
+done
+
+# Defaults
+LocalDirectory=${LocalDirectory:-'/tmp'}
+SourceName=${SourceName:-$Source}
+
+# Predefined Variables
+if [[ -f $Source ]]; then
+  DestinationFile=$Source # "-s" is a file.
+else
+  DestinationFile=$LocalDirectory/$(echo $Source | sed 's/.*\/\///').$(date -u +%F_%H-%M-%S).zip
+fi
+
+# END: Parsing arguments
+
+
+
+if [[ $Mode = 'list' ]]; then
+  [ $Source ] || Err 1 "Missing --source or -s!. Type '$ProgramName $Mode -h' for help."
+
+  ListDB $Source
+fi
+
+if [[ $Mode = 'backup' ]]; then
+  [ $Source ] || Err 1 "Missing --source or -s!. Type '$ProgramName $Mode -h' for help."
+
+  DownloadDB $Source $SourceName $DestinationFile
+fi
+
+if [[ $Mode = 'restore' ]]; then
+  [ $Source ] || Err 1 "Missing --source or -s!. Type '$ProgramName $Mode -h' for help."
+  [ $Destination ] || Err 1 "Missing --destination or -d!. Type '$ProgramName $Mode -h' for help."
+  [ $DestinationName ] || Err 1 "Missing --destination-name or -dn!. Type '$ProgramName $Mode -h' for help."
+
+  if [[ -f $Source ]]; then
+    # "-s" is a file.
+    RestoreDB $Destination $DestinationName $DestinationFile
+  else
+    # "-s" is a hostname.
+    DownloadDB $Source $SourceName $DestinationFile && \
+      RestoreDB $Destination $DestinationName $DestinationFile
+  fi
+fi
+
+if [[ $Mode = 'delete' ]]; then
+  [ $Source ] || Err 1 "Missing --source or -s!. Type '$ProgramName $Mode -h' for help."
+  [[ $SourceName = http* ]] && Err 1 "Missing --source-name or -sn!. Type '$ProgramName $Mode -h' for help."
+
+  DeleteDB $Source $SourceName
+fi
+

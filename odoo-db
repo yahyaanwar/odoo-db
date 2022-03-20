@@ -73,6 +73,10 @@ DownloadDB () {
   Filename=$2
   Filepath=$3
 
+  if ! [[ $(ListDB $Hostname 2>/dev/null | grep -w $Filename) ]]; then
+    Err 1 "Database '$Filename' on '$Hostname' does not exist."
+  fi
+
   stty -echo
   read -p "$Hostname's DB Password: " Password
   printf "\n"
@@ -90,6 +94,7 @@ DownloadDB () {
   if [[ $(file --mime-type -b $Filepath) == 'application/zip' ]]; then
     Log "Database stored at '$Filepath'."
   else
+    rm -f $Filepath
     Err 1 "Failed to backup database, please check your servers and parameters!"
   fi
 }
@@ -99,6 +104,10 @@ RestoreDB () {
   Filename=$2
   Filepath=$3
 
+  if ! [[ $(file --mime-type -b $Filepath) == 'application/zip' ]]; then
+    Err 1 "Backup file ($Filepath) isn't valid a ZIP file."
+  fi
+
   stty -echo
   read -p "$Hostname's DB Password: " Password
   printf "\n"
@@ -106,14 +115,18 @@ RestoreDB () {
 
   Log "Restoring '$Filepath' into '$Hostname'."
 
-  curl -s -F "master_pwd=$Password" \
+  curl -F "master_pwd=$Password" \
       -F "backup_file=@$Filepath" \
       -F "copy=true" \
       -F "name=$Filename" \
       -o /dev/null \
-      $Hostname/web/database/restore
+      $Hostname/web/database/restore 1>/dev/null
 
-  if [[ $(ListDB $Hostname 2>/dev/null | grep -w $Filename) ]]; then
+  CURLExitStatus=$?
+
+  if ! [[ $CURLExitStatus -eq 0 ]]; then
+    Err 1 "Failed to send request. Your file ($Filepath) may doesn't exist."
+  elif [[ $(ListDB $Hostname 2>/dev/null | grep -w $Filename) ]]; then
     Log "Database restored on '$Hostname' with name '$Filename'."
   else
     Err 1 "Failed to restore database, please check your servers and parameters!"
@@ -123,6 +136,10 @@ RestoreDB () {
 DeleteDB () {
   Hostname=$1
   Filename=$2
+
+  if ! [[ $(ListDB $Hostname 2>/dev/null | grep -w $Filename) ]]; then
+    Err 1 "Database '$Filename' on '$Hostname' does not exist."
+  fi
 
   stty -echo
   read -p "$Hostname's DB Password: " Password
@@ -227,13 +244,15 @@ if [[ $Mode = 'restore' ]]; then
   [ $Destination ] || Err 1 "Missing --destination or -d!. Type '$ProgramName $Mode -h' for help."
   [ $DestinationName ] || Err 1 "Missing --destination-name or -dn!. Type '$ProgramName $Mode -h' for help."
 
-  if [[ -f $Source ]]; then
-    # "-s" is a file.
+  if [[ $(file --mime-type -b $Source) == 'application/zip' ]]; then
+    # "-s" is a zip file.
     RestoreDB $Destination $DestinationName $DestinationFile
-  else
+  elif [[ $Source = http* ]]; then
     # "-s" is a hostname.
     DownloadDB $Source $SourceName $DestinationFile && \
       RestoreDB $Destination $DestinationName $DestinationFile
+  else
+    Err 1 "--source or -s should be URL or ZIP file."
   fi
 fi
 

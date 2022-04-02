@@ -84,7 +84,7 @@ DownloadDB () {
 
   Log "Downloading '$Filename' database from '$Hostname'."
 
-  curl -s -X POST \
+  curl -X POST \
       -F "master_pwd=$Password" \
       -F "name=$Filename" \
       -F "backup_format=zip" \

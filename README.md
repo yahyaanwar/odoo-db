@@ -2,7 +2,7 @@
 
 Manage Odoo databases from CLI
 
-**Usage:** `odoo-cli (list|ls|backup|restore|delete) [Options]`
+**Usage:** `odoo-db (list|ls|backup|restore|delete) [Options]`
 
 Use "-h" on list, backup, restore, or delete command to getting spesific help.
 

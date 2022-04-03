@@ -50,11 +50,11 @@ Err () {
 }
 
 ListDB () {
-  Hostname=$1
+  local Hostname=$1
 
   Log "List of databases from '$Hostname'."
 
-  DBList=$(curl -s -X POST \
+  local DBList=$(curl -s -X POST \
      -H "Content-type: application/json" \
      -d '{}' \
      $Hostname/web/database/list | \
@@ -69,9 +69,9 @@ ListDB () {
 }
 
 DownloadDB () {
-  Hostname=$1
-  Filename=$2
-  Filepath=$3
+  local Hostname=$1
+  local Filename=$2
+  local Filepath=$3
 
   if ! [[ $(ListDB $Hostname 2>/dev/null | grep -w $Filename) ]]; then
     Err 1 "Database '$Filename' on '$Hostname' does not exist."
@@ -100,9 +100,9 @@ DownloadDB () {
 }
 
 RestoreDB () {
-  Hostname=$1
-  Filename=$2
-  Filepath=$3
+  local Hostname=$1
+  local Filename=$2
+  local Filepath=$3
 
   if ! [[ $(file --mime-type -b $Filepath) == 'application/zip' ]]; then
     Err 1 "Backup file ($Filepath) isn't valid a ZIP file."
@@ -122,7 +122,7 @@ RestoreDB () {
       -o /dev/null \
       $Hostname/web/database/restore 1>/dev/null
 
-  CURLExitStatus=$?
+  local CURLExitStatus=$?
 
   if ! [[ $CURLExitStatus -eq 0 ]]; then
     Err 1 "Failed to send request. Your file ($Filepath) may doesn't exist."
@@ -134,8 +134,8 @@ RestoreDB () {
 }
 
 DeleteDB () {
-  Hostname=$1
-  Filename=$2
+  local Hostname=$1
+  local Filename=$2
 
   if ! [[ $(ListDB $Hostname 2>/dev/null | grep -w $Filename) ]]; then
     Err 1 "Database '$Filename' on '$Hostname' does not exist."
